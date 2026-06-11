@@ -7,7 +7,17 @@ from mediapipe.tasks.python import vision
 from sklearn.cluster import KMeans
 import os
 
+import urllib.request
+
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "face_landmarker.task")
+
+if not os.path.exists(MODEL_PATH):
+    print("Downloading face landmarker model...")
+    urllib.request.urlretrieve(
+        "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+        MODEL_PATH
+    )
+    print("Model downloaded!")
 
 SKIN_INDICES = [
     10, 67, 69, 104, 108, 151, 337, 299, 333, 298,
