@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.env
+
+# Node
+node_modules/
+dist/
+
+# Images and model (too large for GitHub)
+backend/tan.jpg
+backend/face_crop.jpg
+backend/face_landmarks.jpg
+backend/lip_points.jpg
+backend/skin_points.jpg
+backend/face_landmarker.task
