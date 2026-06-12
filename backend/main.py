@@ -7,7 +7,10 @@ app = FastAPI()
 # CORS lets the React frontend talk to this backend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://face-color-project.vercel.app"],
+    allow_origins=[
+        "https://face-color-project.vercel.app",
+        "https://face-color-project-i3olawumk-tanmayee-s-projects.vercel.app"
+    ],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
