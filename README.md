@@ -47,7 +47,11 @@ Palette recommendations returned as JSON → React renders results
 
 ## 🚀 Run Locally
 
-### Backend
+### Prerequisites
+- Python 3.10+
+- Node.js 18+
+
+### Backend setup
 
 ```bash
 cd backend
@@ -55,17 +59,27 @@ pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 
-### Frontend
+Backend runs at `http://127.0.0.1:8000`
+
+### Frontend setup
 
 ```bash
 cd frontend
 npm install
-npm run dev
 ```
 
 Create `frontend/.env`:
 ```
 VITE_API_URL=http://127.0.0.1:8000
+```
+
+Then run:
+```bash
+npm run dev
+```
+
+Frontend runs at `http://localhost:5173`
+
 ```
 
 ## ✨ Features
