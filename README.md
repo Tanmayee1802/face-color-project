@@ -20,7 +20,7 @@ Upload a photo or use your webcam — the app will:
 
 ## 🧠 How it works
 
-```
+```text
 Photo uploaded
       ↓
 MediaPipe detects 478 face landmarks
@@ -39,7 +39,7 @@ Palette recommendations returned as JSON → React renders results
 ### Seasonal Color Theory
 
 | Season | Undertone | Key Colors |
-|--------|-----------|------------|
+|----------|------------|------------|
 | 🌸 Spring | Warm | Peach, coral, golden yellow |
 | ☁️ Summer | Cool | Dusty rose, lavender, powder blue |
 | 🍂 Autumn | Warm | Rust, olive, burnt orange |
@@ -48,6 +48,7 @@ Palette recommendations returned as JSON → React renders results
 ## 🚀 Run Locally
 
 ### Prerequisites
+
 - Python 3.10+
 - Node.js 18+
 
@@ -69,18 +70,18 @@ npm install
 ```
 
 Create `frontend/.env`:
-```
+
+```env
 VITE_API_URL=http://127.0.0.1:8000
 ```
 
 Then run:
+
 ```bash
 npm run dev
 ```
 
 Frontend runs at `http://localhost:5173`
-
-```
 
 ## ✨ Features
 
