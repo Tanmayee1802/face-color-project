@@ -2,12 +2,11 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import colorsys
+import os
+import urllib.request
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 from sklearn.cluster import KMeans
-import os
-
-import urllib.request
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "face_landmarker.task")
 
@@ -19,35 +18,132 @@ if not os.path.exists(MODEL_PATH):
     )
     print("Model downloaded!")
 
-SKIN_INDICES = [
-    10, 67, 69, 104, 108, 151, 337, 299, 333, 298,
-    50, 101, 118, 117, 116, 123, 147, 187, 207,
-    280, 330, 347, 346, 345, 352, 376, 411, 427,
+# --- face outline polygon ---
+FACE_OVAL = [
+    10, 338, 297, 332, 284, 251, 389, 356, 454, 323,
+    361, 288, 397, 365, 379, 378, 400, 377, 152, 148,
+    176, 149, 150, 136, 172, 58, 132, 93, 234, 127,
+    162, 21, 54, 103, 67, 109
 ]
 
-LIP_INDICES = [
-    61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291,
-    375, 321, 405, 314, 17, 84, 181, 91, 146, 61,
-    78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308,
+# --- regions to exclude from skin ---
+LEFT_EYE = [
+    33, 7, 163, 144, 145, 153, 154, 155,
+    133, 173, 157, 158, 159, 160, 161, 246
 ]
+RIGHT_EYE = [
+    362, 382, 381, 380, 374, 373, 390, 249,
+    263, 466, 388, 387, 386, 385, 384, 398
+]
+LEFT_EYEBROW = [70, 63, 105, 66, 107, 55, 65, 52, 53, 46]
+RIGHT_EYEBROW = [300, 293, 334, 296, 336, 285, 295, 282, 283, 276]
+NOSE = [1, 2, 98, 327, 168, 195, 197, 4, 240, 97, 2]
+LIPS_OUTER = [
+    61, 146, 91, 181, 84, 17, 314,
+    405, 321, 375, 291, 409, 270,
+    269, 267, 0, 37, 39, 40, 185
+]
+
+# --- lip polygon ---
+LIPS_ALL = [
+    61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291,
+    375, 321, 405, 314, 17, 84, 181, 91, 146,
+    78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308
+]
+
+
+def get_polygon_mask(landmarks, indices, h, w):
+    """create a filled polygon mask from landmark indices"""
+    points = []
+    for idx in indices:
+        lm = landmarks[idx]
+        px = int(lm.x * w)
+        py = int(lm.y * h)
+        points.append([px, py])
+    points = np.array(points, dtype=np.int32)
+    mask = np.zeros((h, w), dtype=np.uint8)
+    cv2.fillPoly(mask, [points], 255)
+    return mask
+
+
+def get_skin_mask(landmarks, h, w):
+    """face polygon minus eyes, eyebrows, nose, lips"""
+    # start with full face
+    face_mask = get_polygon_mask(landmarks, FACE_OVAL, h, w)
+
+    # subtract exclusion zones
+    for region in [LEFT_EYE, RIGHT_EYE, LEFT_EYEBROW, RIGHT_EYEBROW, NOSE, LIPS_OUTER]:
+        exclude = get_polygon_mask(landmarks, region, h, w)
+        face_mask = cv2.subtract(face_mask, exclude)
+
+    return face_mask
+
+
+def get_lip_mask(landmarks, h, w):
+    """filled lip polygon"""
+    return get_polygon_mask(landmarks, LIPS_ALL, h, w)
+
 
 def get_dominant_color(pixels, n_clusters):
+    """K-means on pixel array, return dominant cluster color"""
+    if len(pixels) < n_clusters:
+        return pixels.mean(axis=0).astype(int)
     kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
     kmeans.fit(pixels)
     colors = kmeans.cluster_centers_.astype(int)
     counts = np.bincount(kmeans.labels_)
     return colors[np.argmax(counts)]
 
+
 def rgb_to_hsv_degrees(rgb):
-    r, g, b = rgb / 255.0
+    r, g, b = np.array(rgb) / 255.0
     h, s, v = colorsys.rgb_to_hsv(r, g, b)
     return h * 360, s, v
 
-def classify_season(hue, sat, val, undertone):
-    if undertone == "WARM":
-        return "Spring" if val >= 0.70 and sat <= 0.45 else "Autumn"
+
+def get_undertone(r, g, b):
+    """
+    improved undertone detection using channel ratios
+    instead of simple HSV hue threshold
+    """
+    total = r + g + b + 1e-5
+
+    warm_score = (r - b) / 255.0        # warm = red dominates over blue
+    cool_score = (b - r) / 255.0        # cool = blue dominates over red
+    neutral_score = 1 - abs(warm_score) # neutral = balanced
+
+    if warm_score > 0.08:
+        return "WARM", warm_score
+    elif cool_score > 0.08:
+        return "COOL", cool_score
     else:
-        return "Summer" if val >= 0.65 and sat <= 0.45 else "Winter"
+        return "NEUTRAL", neutral_score
+
+
+def correct_lighting(img_rgb):
+    """
+    simple white balance correction to normalize lighting
+    makes results consistent across different lighting conditions
+    """
+    img_lab = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
+
+    # normalize L channel to target brightness
+    l, a, b = cv2.split(img_lab)
+    target_l = 128.0
+    current_l = l.mean()
+    scale = target_l / (current_l + 1e-5)
+    l = np.clip(l * scale, 0, 255)
+
+    img_lab = cv2.merge([l, a, b]).astype(np.uint8)
+    return cv2.cvtColor(img_lab, cv2.COLOR_LAB2RGB)
+
+
+def classify_season(undertone, skin_val):
+    if undertone == "WARM":
+        return "Spring" if skin_val >= 0.65 else "Autumn"
+    else:
+        return "Summer" if skin_val >= 0.60 else "Winter"
+
 
 def get_palette(season):
     palettes = {
@@ -138,17 +234,17 @@ def get_palette(season):
     }
     return palettes[season]
 
-def analyze_image(img_bytes: bytes) -> dict:
-    """
-    main function — receives image as bytes, returns full analysis as dict
-    this is what FastAPI will call
-    """
 
-    # --- decode bytes into image ---
+def analyze_image(img_bytes: bytes) -> dict:
+    # --- decode image ---
     nparr = np.frombuffer(img_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    h, w = img.shape[:2]
+
+    # --- lighting correction ---
+    img_rgb = correct_lighting(img_rgb)
+
+    h, w = img_rgb.shape[:2]
 
     # --- mediapipe ---
     base_options = python.BaseOptions(model_asset_path=MODEL_PATH)
@@ -163,44 +259,38 @@ def analyze_image(img_bytes: bytes) -> dict:
 
         landmarks = results.face_landmarks[0]
 
-        # --- skin ---
-        skin_pixels = []
-        for idx in SKIN_INDICES:
-            lm = landmarks[idx]
-            px, py = int(lm.x * w), int(lm.y * h)
-            skin_pixels.append(img_rgb[py, px])
-        skin_pixels = np.array(skin_pixels)
-        skin_color = get_dominant_color(skin_pixels, 3)
+        # --- skin: all pixels inside face polygon minus exclusion zones ---
+        skin_mask = get_skin_mask(landmarks, h, w)
+        skin_pixels = img_rgb[skin_mask == 255]
+        print(f"Skin pixels extracted: {len(skin_pixels)}")  # will be 40k+ now
+
+        if len(skin_pixels) < 10:
+            return {"error": "Could not extract enough skin pixels. Try a clearer photo."}
+
+        skin_color = get_dominant_color(skin_pixels, n_clusters=4)
         skin_hue, skin_sat, skin_val = rgb_to_hsv_degrees(skin_color)
 
-        # --- lips ---
-        lip_pixels = []
-        for idx in LIP_INDICES:
-            lm = landmarks[idx]
-            px, py = int(lm.x * w), int(lm.y * h)
-            lip_pixels.append(img_rgb[py, px])
-        lip_pixels = np.array(lip_pixels)
-        lip_color = get_dominant_color(lip_pixels, 2)
+        # --- improved undertone detection ---
+        undertone, confidence = get_undertone(*skin_color)
 
-        # --- undertone ---
-        if 10 <= skin_hue <= 45 and skin_sat > 0.2:
-            undertone = "WARM"
-        elif 180 <= skin_hue <= 280:
-            undertone = "COOL"
-        else:
-            undertone = "NEUTRAL"
+        # --- lip: all pixels inside lip polygon ---
+        lip_mask = get_lip_mask(landmarks, h, w)
+        lip_pixels = img_rgb[lip_mask == 255]
+        print(f"Lip pixels extracted: {len(lip_pixels)}")
+
+        lip_color = get_dominant_color(lip_pixels, n_clusters=2) if len(lip_pixels) >= 2 else skin_color
 
         # --- season + palette ---
-        season = classify_season(skin_hue, skin_sat, skin_val, undertone)
+        season = classify_season(undertone, skin_val)
         palette = get_palette(season)
 
-        # --- return as dict (FastAPI converts to JSON) ---
         return {
             "season": season,
             "undertone": undertone,
             "description": palette["description"],
             "skin_color": skin_color.tolist(),
             "lip_color": lip_color.tolist(),
+            "skin_pixels_used": len(skin_pixels),
             "clothing": [{"name": n, "rgb": c} for n, c in palette["clothing"]],
             "lipstick": [{"name": n, "rgb": c} for n, c in palette["lipstick"]],
             "avoid": palette["avoid"]
