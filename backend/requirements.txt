@@ -4,11 +4,6 @@ fastapi
 uvicorn
 python-multipart
 scikit-learn
-numpy
-fastapi
-uvicorn
-python-multipart
-opencv-python-headless
-mediapipe
-scikit-learn
-numpy
+numpy==1.26.4
+google-genai
+python-dotenv

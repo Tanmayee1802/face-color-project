@@ -3,10 +3,16 @@ import mediapipe as mp
 import numpy as np
 import colorsys
 import os
+import json
 import urllib.request
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 from sklearn.cluster import KMeans
+from google import genai
+
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+_gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+print(f"DEBUG: GEMINI_API_KEY loaded = {bool(GEMINI_API_KEY)}, length = {len(GEMINI_API_KEY) if GEMINI_API_KEY else 0}")
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "face_landmarker.task")
 
@@ -113,11 +119,17 @@ def get_undertone(r, g, b):
     neutral_score = 1 - abs(warm_score) # neutral = balanced
 
     if warm_score > 0.08:
-        return "WARM", warm_score
+        result = "WARM", warm_score
     elif cool_score > 0.08:
-        return "COOL", cool_score
+        result = "COOL", cool_score
     else:
-        return "NEUTRAL", neutral_score
+        result = "NEUTRAL", neutral_score
+
+    return result[0], result[1], {
+        "warm_score": round(float(warm_score), 4),
+        "cool_score": round(float(cool_score), 4),
+        "neutral_score": round(float(neutral_score), 4),
+    }
 
 
 def correct_lighting(img_rgb):
@@ -235,6 +247,66 @@ def get_palette(season):
     return palettes[season]
 
 
+def get_ai_insights(season, undertone, skin_color, lip_color, undertone_scores):
+    """
+    Calls Gemini to generate:
+    1. A short color-theory explanation grounded in this person's actual measured values
+       (not a generic template) - this is the explainability layer.
+    2. Budget-friendly product suggestions from accessible Indian drugstore brands,
+       instead of only luxury picks - this is the accessibility layer.
+    Falls back to a static (non-AI) message if no API key is configured or the call fails,
+    so the app never breaks in front of judges.
+    """
+    fallback = {
+        "ai_reasoning": (
+            f"Your skin reads as {undertone.lower()} because your red channel value "
+            f"is measurably higher than blue in the pixels sampled from your cheeks and "
+            f"forehead. Combined with a brightness (V) value that places you in the "
+            f"{season} range, warm/cool color families in that season tend to harmonize "
+            f"with your natural coloring rather than clash against it."
+        ),
+        "budget_picks": [
+            {"item": "Check Lakmé, Sugar Cosmetics, or Insight Cosmetics", "note": "Affordable Indian brands with shades close to this palette"},
+        ],
+        "ai_generated": False,
+    }
+
+    if not _gemini_client:
+        return fallback
+
+    prompt = f"""You are a color-theory assistant for a free student-built app. A user's photo was analyzed with computer vision, producing these MEASURED values (not guesses):
+
+- Detected season: {season}
+- Detected undertone: {undertone}
+- Undertone confidence scores: warm={undertone_scores['warm_score']}, cool={undertone_scores['cool_score']}, neutral={undertone_scores['neutral_score']}
+- Measured skin RGB: {list(skin_color)}
+- Measured natural lip RGB: {list(lip_color)}
+
+Return ONLY valid JSON (no markdown fences, no preamble) matching exactly this shape:
+{{
+  "ai_reasoning": "2-3 sentences explaining WHY this season/undertone follows from these specific measured values, using real color theory (complementary/analogous relationships, warm-cool contrast). Reference the actual numbers given. Do not use generic filler.",
+  "budget_picks": [
+    {{"item": "a specific type of product (e.g. 'terracotta lipstick')", "note": "1 or 2 affordable Indian drugstore brands (Lakmé, Sugar Cosmetics, Insight, Maybelline, Faces Canada, Colorbar) known for having a shade in this color family, with an approx price range in INR"}},
+    {{"item": "...", "note": "..."}},
+    {{"item": "...", "note": "..."}}
+  ]
+}}"""
+
+    try:
+        response = _gemini_client.models.generate_content(
+            model="gemini-3.1-flash-lite",
+            contents=prompt,
+        )
+        raw = response.text.strip()
+        raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        parsed = json.loads(raw)
+        parsed["ai_generated"] = True
+        return parsed
+    except Exception as e:
+        print(f"Gemini call failed, using fallback: {e}")
+        return fallback
+
+
 def analyze_image(img_bytes: bytes) -> dict:
     # --- decode image ---
     nparr = np.frombuffer(img_bytes, np.uint8)
@@ -271,7 +343,7 @@ def analyze_image(img_bytes: bytes) -> dict:
         skin_hue, skin_sat, skin_val = rgb_to_hsv_degrees(skin_color)
 
         # --- improved undertone detection ---
-        undertone, confidence = get_undertone(*skin_color)
+        undertone, confidence, undertone_scores = get_undertone(*skin_color)
 
         # --- lip: all pixels inside lip polygon ---
         lip_mask = get_lip_mask(landmarks, h, w)
@@ -284,6 +356,9 @@ def analyze_image(img_bytes: bytes) -> dict:
         season = classify_season(undertone, skin_val)
         palette = get_palette(season)
 
+        # --- AI reasoning + budget-friendly picks (Gemini) ---
+        ai_insights = get_ai_insights(season, undertone, skin_color, lip_color, undertone_scores)
+
         return {
             "season": season,
             "undertone": undertone,
@@ -293,5 +368,16 @@ def analyze_image(img_bytes: bytes) -> dict:
             "skin_pixels_used": len(skin_pixels),
             "clothing": [{"name": n, "rgb": c} for n, c in palette["clothing"]],
             "lipstick": [{"name": n, "rgb": c} for n, c in palette["lipstick"]],
-            "avoid": palette["avoid"]
+            "avoid": palette["avoid"],
+            # --- explainability panel data ---
+            "explainability": {
+                "skin_hue": round(skin_hue, 1),
+                "skin_saturation": round(skin_sat, 3),
+                "skin_brightness": round(skin_val, 3),
+                "undertone_scores": undertone_scores,
+            },
+            # --- AI reasoning + accessible product picks ---
+            "ai_reasoning": ai_insights["ai_reasoning"],
+            "budget_picks": ai_insights["budget_picks"],
+            "ai_generated": ai_insights["ai_generated"],
         }

@@ -1,6 +1,6 @@
 import { useState, useRef } from "react"
 
-export default function Upload({ onResult }) {
+export default function Upload({ onResult, onLoading })  {
   const [mode, setMode] = useState("upload")
   const [preview, setPreview] = useState(null)
   const [file, setFile] = useState(null)
@@ -68,6 +68,7 @@ export default function Upload({ onResult }) {
     if (!file) return
     setLoading(true)
     setError(null)
+    onLoading() 
 
     const formData = new FormData()
     formData.append("file", file)

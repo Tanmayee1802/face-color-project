@@ -97,6 +97,60 @@ export default function Results({ data, onReset }) {
           </div>
         </div>
 
+        {/* AI reasoning */}
+        {data.ai_reasoning && (
+          <div style={styles.card}>
+            <p style={styles.cardLabel}>
+              🤖 Why This Palette {data.ai_generated ? "" : "(offline mode)"}
+            </p>
+            <p style={styles.description}>{data.ai_reasoning}</p>
+          </div>
+        )}
+
+        {/* budget picks */}
+        {data.budget_picks && data.budget_picks.length > 0 && (
+          <div style={styles.card}>
+            <p style={styles.cardLabel}>💸 Budget-Friendly Picks</p>
+            {data.budget_picks.map((pick, i) => (
+              <div key={i} style={styles.budgetRow}>
+                <p style={styles.budgetItem}>{pick.item}</p>
+                <p style={styles.budgetNote}>{pick.note}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* explainability panel */}
+        {data.explainability && (
+          <div style={styles.card}>
+            <p style={styles.cardLabel}>🔍 How This Was Measured</p>
+            <div style={styles.explainGrid}>
+              <div style={styles.explainStat}>
+                <p style={styles.explainValue}>{data.skin_pixels_used?.toLocaleString()}</p>
+                <p style={styles.explainLabel}>skin pixels sampled</p>
+              </div>
+              <div style={styles.explainStat}>
+                <p style={styles.explainValue}>{data.explainability.skin_hue}°</p>
+                <p style={styles.explainLabel}>hue</p>
+              </div>
+              <div style={styles.explainStat}>
+                <p style={styles.explainValue}>{data.explainability.skin_brightness}</p>
+                <p style={styles.explainLabel}>brightness (V)</p>
+              </div>
+            </div>
+            <div style={styles.undertoneBar}>
+              <div style={{
+                ...styles.undertoneFill,
+                width: `${Math.max(0, data.explainability.undertone_scores.warm_score) * 100 * 4}%`,
+                background: "linear-gradient(90deg, #e8956d, #c06030)"
+              }} />
+            </div>
+            <p style={styles.explainCaption}>
+              warm score: {data.explainability.undertone_scores.warm_score} · cool score: {data.explainability.undertone_scores.cool_score}
+            </p>
+          </div>
+        )}
+
         {/* buttons */}
         <button style={styles.shareBtn} onClick={handleShare}>
           📸 Save as Image
@@ -253,5 +307,56 @@ const styles = {
     fontWeight: "600",
     cursor: "pointer",
     marginBottom: "40px",
+  },
+  budgetRow: {
+    marginBottom: "12px",
+  },
+  budgetItem: {
+    fontSize: "13px",
+    fontWeight: "600",
+    color: "#333",
+    marginBottom: "2px",
+  },
+  budgetNote: {
+    fontSize: "12px",
+    color: "#888",
+    lineHeight: "1.5",
+  },
+  explainGrid: {
+    display: "flex",
+    justifyContent: "space-between",
+    marginBottom: "16px",
+  },
+  explainStat: {
+    textAlign: "center",
+  },
+  explainValue: {
+    fontSize: "18px",
+    fontWeight: "700",
+    color: "#c06030",
+  },
+  explainLabel: {
+    fontSize: "10px",
+    color: "#aaa",
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+  },
+  undertoneBar: {
+    width: "100%",
+    height: "8px",
+    background: "#f0e8e0",
+    borderRadius: "4px",
+    overflow: "hidden",
+    marginBottom: "8px",
+  },
+  undertoneFill: {
+    height: "100%",
+    borderRadius: "4px",
+    transition: "width 0.3s ease",
+  },
+  explainCaption: {
+    fontSize: "11px",
+    color: "#aaa",
+    fontFamily: "monospace",
   },
 }
